@@ -31,6 +31,13 @@ app.MapPost("/endpoints", async (CreateEndpointRequest request, AppDbContext db)
     return Results.Created($"/endpoints/{endpoint.Id}", new { id = endpoint.Id });
 });
 
+app.MapGet("/endpoints", async (AppDbContext db) =>
+    Results.Ok(await db.Endpoints
+        .AsNoTracking()
+        .OrderBy(e => e.Id)
+        .Select(e => new { id = e.Id, url = e.Url })
+        .ToListAsync()));
+
 app.Run();
 
 record CreateEndpointRequest(string? Url);
