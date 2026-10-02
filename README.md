@@ -31,3 +31,12 @@ flowchart LR
 The API serves user requests; the background checker performs scheduled checks independently of the UI. After a check is saved, the UI gets the latest status and latency history through the API. A CI/CD pipeline will build and deploy the API and UI.
 
 This describes the intended architecture; implementation has not started yet.
+
+## Check behavior and data
+
+- **Schedule:** Each endpoint is checked every [TBD].
+- **Success:** A check succeeds when [TBD, such as an HTTP 2xx response].
+- **Timeout:** Each attempt stops after [TBD].
+- **Retries:** Failed attempts are retried [TBD] times.
+- **Stored result:** Endpoint ID, check time, success/failure, HTTP status (if received),
+  response time, and error details (if applicable).
