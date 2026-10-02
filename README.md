@@ -40,3 +40,7 @@ This describes the intended architecture; implementation has not started yet.
 - **Retries:** Failed attempts are retried [TBD] times.
 - **Stored result:** Endpoint ID, check time, success/failure, HTTP status (if received),
   response time, and error details (if applicable).
+
+  ## Configuration and secrets
+
+Monitored endpoint settings will be managed through the API and stored in Azure SQL. Application settings will come from the deployment environment. The method for storing endpoint credentials is still TBD; credentials and other secrets must not be committed to source control.
