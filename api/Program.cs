@@ -38,6 +38,32 @@ app.MapGet("/endpoints", async (AppDbContext db) =>
         .Select(e => new { id = e.Id, url = e.Url })
         .ToListAsync()));
 
+app.MapGet("/endpoints/{id:int}/checks", async (int id, AppDbContext db) =>
+{
+    if (!await db.Endpoints.AnyAsync(e => e.Id == id))
+    {
+        return Results.NotFound();
+    }
+
+    var checks = await db.CheckResults
+        .AsNoTracking()
+        .Where(c => c.EndpointId == id)
+        .OrderByDescending(c => c.CheckTimeUtc)
+        .Take(50)
+        .Select(c => new
+        {
+            id = c.Id,
+            endpointId = c.EndpointId,
+            checkTimeUtc = c.CheckTimeUtc,
+            success = c.Success,
+            latencyMs = c.LatencyMs,
+            httpStatusCode = c.HttpStatusCode
+        })
+        .ToListAsync();
+
+    return Results.Ok(checks);
+});
+
 app.Run();
 
 record CreateEndpointRequest(string? Url);
