@@ -48,9 +48,9 @@ namespace CloudApiReliabilityDashboard.Api.Migrations
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_CheckResults_EndpointId",
+                name: "IX_CheckResults_EndpointId_CheckTimeUtc",
                 table: "CheckResults",
-                column: "EndpointId");
+                columns: new[] { "EndpointId", "CheckTimeUtc" });
         }
 
         /// <inheritdoc />

@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CloudApiReliabilityDashboard.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261002224558_AddEndpointChecks")]
+    [Migration("20261002224754_AddEndpointChecks")]
     partial class AddEndpointChecks
     {
         /// <inheritdoc />
@@ -50,7 +50,7 @@ namespace CloudApiReliabilityDashboard.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EndpointId");
+                    b.HasIndex("EndpointId", "CheckTimeUtc");
 
                     b.ToTable("CheckResults");
                 });

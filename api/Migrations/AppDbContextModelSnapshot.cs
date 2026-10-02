@@ -47,7 +47,7 @@ namespace CloudApiReliabilityDashboard.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EndpointId");
+                    b.HasIndex("EndpointId", "CheckTimeUtc");
 
                     b.ToTable("CheckResults");
                 });
