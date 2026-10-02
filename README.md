@@ -43,16 +43,24 @@ This describes the intended architecture. The ASP.NET Core API project has been 
 
 ## Configuration and secrets
 
-Monitored endpoint settings will be managed through the API and stored in Azure SQL. Application settings will come from the deployment environment. The method for storing endpoint credentials is still TBD; credentials and other secrets must not be committed to source control.
+Monitored endpoint settings will be managed through the API and stored in Azure SQL. The API reads its SQL Server connection string from `ConnectionStrings:DefaultConnection`. For local development, store the local SQL Server connection string in .NET user secrets, which are loaded when the API runs in the `Development` environment. In deployment, supply a separate Azure SQL connection string as the `ConnectionStrings__DefaultConnection` environment variable. Keep connection strings and other secrets out of source control. The method for storing endpoint credentials is still TBD.
 
 ## Local development (planned)
 
 The API project targets .NET 10. The planned full application also requires Node.js and npm for the React UI, Docker for a local SQL Server database, and a Microsoft Entra External ID development tenant for sign-in.
 
-To run the current API scaffold, install the .NET 10 SDK, set the `ConnectionStrings__DefaultConnection` environment variable to a SQL Server connection string, and run `dotnet run --project api`. Then request `/health` on the URL printed by the application. The API registers `AppDbContext` with EF Core's SQL Server provider. The connection string is required at startup; `/health` does not test the database connection. No entities or migrations have been added yet.
+To run the current API scaffold, install the .NET 10 SDK and store your local SQL Server connection string with .NET user secrets. For a SQL Server container listening on port 1433, run this from the repository root, replacing `<local-password>` with its password. Set the environment to `Development` so the API loads user secrets:
+
+```powershell
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=CloudApiReliabilityDashboard;User Id=sa;Password=<local-password>;Encrypt=True;TrustServerCertificate=True" --project api
+$env:DOTNET_ENVIRONMENT = "Development"
+dotnet run --project api
+```
+
+Then request `/health` on the URL printed by the application. The API registers `AppDbContext` with EF Core's SQL Server provider. The connection string is required at startup; `/health` does not test the database connection. No entities or migrations have been added yet. Set `ConnectionStrings__DefaultConnection` in the deployment environment to the Azure SQL connection string; do not reuse the local value.
 
 1. Start a SQL Server container and initialize the database schema using the project's setup or migration command once available. Azure SQL will be used in the deployed environment.
-2. Configure the API's database connection and Entra settings through local environment variables or .NET user secrets, then start the API. The background checker will run with the API as a hosted service.
+2. Configure Entra settings when authentication is added. The background checker will run with the API as a hosted service.
 3. Configure the UI's API URL and Entra settings, then start the React development server and sign in through the UI.
 
-Commands and configuration names for the database, authentication, and UI will be added when those parts are implemented.
+Commands and configuration names for database migrations, authentication, and the UI will be added when those parts are implemented.
