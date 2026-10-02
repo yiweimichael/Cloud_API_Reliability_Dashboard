@@ -1,5 +1,6 @@
 using CloudApiReliabilityDashboard.Api.Data;
 using Microsoft.EntityFrameworkCore;
+using Endpoint = CloudApiReliabilityDashboard.Api.Data.Endpoint;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,4 +16,21 @@ var app = builder.Build();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
+app.MapPost("/endpoints", async (CreateEndpointRequest request, AppDbContext db) =>
+{
+    if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri)
+        || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+    {
+        return Results.BadRequest(new { error = "url must be an absolute http or https URL." });
+    }
+
+    var endpoint = new Endpoint { Url = uri.AbsoluteUri };
+    db.Endpoints.Add(endpoint);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/endpoints/{endpoint.Id}", new { id = endpoint.Id });
+});
+
 app.Run();
+
+record CreateEndpointRequest(string? Url);
