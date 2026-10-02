@@ -44,3 +44,13 @@ This describes the intended architecture; implementation has not started yet.
   ## Configuration and secrets
 
 Monitored endpoint settings will be managed through the API and stored in Azure SQL. Application settings will come from the deployment environment. The method for storing endpoint credentials is still TBD; credentials and other secrets must not be committed to source control.
+
+## Local development (planned)
+
+The expected prerequisites are a .NET SDK for the ASP.NET Core API, Node.js and npm for the React UI, Docker for a local SQL Server database, and a Microsoft Entra External ID development tenant for sign-in. Supported versions will be specified when the applications are created.
+
+1. Start a SQL Server container and initialize the database schema using the project's setup or migration command once available. Azure SQL will be used in the deployed environment.
+2. Configure the API's database connection and Entra settings through local environment variables or .NET user secrets, then start the API. The background checker will run with the API as a hosted service.
+3. Configure the UI's API URL and Entra settings, then start the React development server and sign in through the UI.
+
+Exact commands and configuration names will be added when the API and UI are implemented. No services are runnable from this repository yet.
