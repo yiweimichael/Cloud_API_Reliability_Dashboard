@@ -1,3 +1,4 @@
+using CloudApiReliabilityDashboard.Api.Checks;
 using CloudApiReliabilityDashboard.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Endpoint = CloudApiReliabilityDashboard.Api.Data.Endpoint;
@@ -11,6 +12,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.Configure<CheckerOptions>(builder.Configuration.GetSection("Checker"));
 builder.Services.AddScoped<CheckResultService>();
 
 var app = builder.Build();
