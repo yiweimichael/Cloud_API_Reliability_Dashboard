@@ -49,7 +49,7 @@ Monitored endpoint settings will be managed through the API and stored in Azure 
 
 The API project targets .NET 10. The planned full application also requires Node.js and npm for the React UI, Docker for a local SQL Server database, and a Microsoft Entra External ID development tenant for sign-in.
 
-To run the current API scaffold, install the .NET 10 SDK and run `dotnet run --project api`. Then request `/health` on the URL printed by the application.
+To run the current API scaffold, install the .NET 10 SDK, set the `ConnectionStrings__DefaultConnection` environment variable to a SQL Server connection string, and run `dotnet run --project api`. Then request `/health` on the URL printed by the application. The API registers `AppDbContext` with EF Core's SQL Server provider. The connection string is required at startup; `/health` does not test the database connection. No entities or migrations have been added yet.
 
 1. Start a SQL Server container and initialize the database schema using the project's setup or migration command once available. Azure SQL will be used in the deployed environment.
 2. Configure the API's database connection and Entra settings through local environment variables or .NET user secrets, then start the API. The background checker will run with the API as a hosted service.
