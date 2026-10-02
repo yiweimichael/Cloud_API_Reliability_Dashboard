@@ -11,6 +11,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddScoped<CheckResultService>();
 
 var app = builder.Build();
 
