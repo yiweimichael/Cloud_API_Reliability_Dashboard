@@ -14,6 +14,11 @@ if (string.IsNullOrWhiteSpace(connectionString))
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.Configure<CheckerOptions>(builder.Configuration.GetSection("Checker"));
 builder.Services.AddScoped<CheckResultService>();
+builder.Services.AddHttpClient("checker");
+if (builder.Configuration.GetValue<bool>("Checker:Enabled", true))
+{
+    builder.Services.AddHostedService<EndpointCheckWorker>();
+}
 
 var app = builder.Build();
 
