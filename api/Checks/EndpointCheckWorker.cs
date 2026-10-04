@@ -65,7 +65,7 @@ internal sealed class EndpointCheckWorker : BackgroundService
         }
     }
 
-    private async Task CheckOneAsync(Endpoint endpoint, CancellationToken stoppingToken)
+    internal async Task CheckOneAsync(Endpoint endpoint, CancellationToken stoppingToken)
     {
         try
         {

@@ -30,16 +30,22 @@ flowchart LR
 
 The API serves user requests; the background checker performs scheduled checks independently of the UI. After a check is saved, the UI gets the latest status and latency history through the API. A CI/CD pipeline will build and deploy the API and UI.
 
-This describes the intended architecture. The ASP.NET Core API can already create and list endpoints and return their check history, backed by SQL Server through EF Core with a migration. `CheckResultService.SaveCheckResultAsync` is the entry point the background checker will call to save results. The background checker, authentication, and the UI are still planned.
+This describes the intended architecture. The ASP.NET Core API can already create and list endpoints and return their check history, backed by SQL Server through EF Core with a migration. The background checker runs as a hosted service in the API and saves results through `CheckResultService.SaveCheckResultAsync`. Authentication and the UI are still planned.
 
 ## Check behavior and data
 
-- **Schedule:** Each endpoint is checked every [TBD].
-- **Success:** A check succeeds when [TBD, such as an HTTP 2xx response].
-- **Timeout:** Each attempt stops after [TBD].
-- **Retries:** Failed attempts are retried [TBD] times.
-- **Stored result:** Endpoint ID, check time, success/failure, HTTP status (if received),
-  response time, and error details (if applicable).
+- **Schedule:** Each endpoint is checked every 60 seconds (`Checker:IntervalSeconds`).
+- **Success:** A check succeeds when the final attempt gets an HTTP status from 200 to 399.
+- **Timeout:** Each attempt stops after 5 seconds (`Checker:TimeoutSeconds`).
+- **Retries:** A 5xx response, network error, or timeout is retried up to 2 times (`Checker:MaxRetries`), waiting 1 second before the first retry and 2 seconds before the second. A 4xx response is not retried.
+- **Stored result:** One row per check: endpoint ID, check time, success/failure, HTTP status
+  (null if no response arrived), and the response time of the final attempt. Error details are not stored yet.
+
+## Background checker
+
+`EndpointCheckWorker` is a hosted service that starts with the API. On each interval it loads all endpoints from the database and checks them concurrently with the named `checker` `HttpClient`, then saves one result per endpoint. The first check runs one interval after startup. If checking or saving fails for one endpoint, the error is logged and the other endpoints are unaffected.
+
+It reads the `Checker` section of `appsettings.json` (`IntervalSeconds`, `TimeoutSeconds`, `MaxRetries`, `Enabled`). Any value can be overridden with an environment variable such as `Checker__IntervalSeconds=30`. Set `Checker:Enabled` to `false` to run the API without the checker; the route tests do this so they make no outbound HTTP calls.
 
 ## Configuration and secrets
 
@@ -54,7 +60,7 @@ Monitored endpoint settings will be managed through the API and stored in Azure 
 | `GET /endpoints` | Lists monitored endpoints as `{ id, url }`, ordered by id. |
 | `GET /endpoints/{id}/checks` | Returns the latest 50 check results for the endpoint, newest first, each with `id`, `endpointId`, `checkTimeUtc`, `success`, `latencyMs`, and `httpStatusCode`. Returns `404` if the endpoint does not exist. |
 
-Check results are saved through `CheckResultService.SaveCheckResultAsync`, which stamps the current UTC time. It is registered in dependency injection for the background checker to use later; no route calls it.
+Check results are saved through `CheckResultService.SaveCheckResultAsync`, which stamps the current UTC time. The background checker calls it after each check; no route calls it.
 
 ## Local development
 
@@ -84,14 +90,15 @@ The API registers `AppDbContext` with EF Core's SQL Server provider. The connect
    Invoke-RestMethod http://localhost:<port>/endpoints
    ```
 
-3. Configure Entra settings when authentication is added. The background checker will run with the API as a hosted service.
+   The background checker starts with the API, so endpoints you add get their first check result within one interval. View the results with `Invoke-RestMethod http://localhost:<port>/endpoints/<id>/checks`.
+3. Configure Entra settings when authentication is added.
 4. Configure the UI's API URL and Entra settings, then start the React development server and sign in through the UI.
 
 Commands and configuration names for authentication and the UI will be added when those parts are implemented.
 
 ## Tests
 
-The tests live in `tests/CloudApiReliabilityDashboard.Api.Tests`. Service tests cover `CheckResultService`, and route tests run the API through `WebApplicationFactory`. Both use an in-memory SQLite database, so they need no SQL Server and no user secrets.
+The tests live in `tests/CloudApiReliabilityDashboard.Api.Tests`. Service tests cover `CheckResultService`, and route tests run the API through `WebApplicationFactory` with `Checker:Enabled=false`. Worker tests run `EndpointCheckWorker` against a stub `HttpMessageHandler` to cover retries and timeouts without network access. All of them use an in-memory SQLite database, so they need no SQL Server and no user secrets. The worker tests wait on real retry delays and timeouts, so they take a few seconds.
 
 ```powershell
 dotnet test tests/CloudApiReliabilityDashboard.Api.Tests

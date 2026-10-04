@@ -26,6 +26,8 @@ public sealed class EndpointRouteTests : IDisposable
         {
             // Program.cs refuses to start without a connection string; the value is never used.
             builder.UseSetting("ConnectionStrings:DefaultConnection", "unused");
+            // Keep the background checker out of route tests so they never make outbound HTTP calls.
+            builder.UseSetting("Checker:Enabled", "false");
 
             builder.ConfigureServices(services =>
             {

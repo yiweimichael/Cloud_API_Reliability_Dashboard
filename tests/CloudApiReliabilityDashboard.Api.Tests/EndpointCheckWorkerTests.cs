@@ -34,20 +34,93 @@ public sealed class EndpointCheckWorkerTests : IDisposable
         _connection.Dispose();
     }
 
-    private sealed class StubHandler(HttpStatusCode status) : HttpMessageHandler
+    // Returns the given statuses in order, repeating the last one once they run out.
+    private sealed class StubHandler(params HttpStatusCode[] statuses) : HttpMessageHandler
     {
         public readonly List<DateTime> CallTimes = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            lock (CallTimes) CallTimes.Add(DateTime.UtcNow);
-            return Task.FromResult(new HttpResponseMessage(status));
+            int call;
+            lock (CallTimes)
+            {
+                call = CallTimes.Count;
+                CallTimes.Add(DateTime.UtcNow);
+            }
+            return Task.FromResult(new HttpResponseMessage(statuses[Math.Min(call, statuses.Length - 1)]));
+        }
+    }
+
+    // Never responds; the request ends only when its cancellation token fires.
+    private sealed class HangingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            throw new InvalidOperationException("Unreachable: the delay only ends by cancellation.");
         }
     }
 
     private sealed class StubFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    private async Task<Data.Endpoint> AddEndpointAsync()
+    {
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var endpoint = new Data.Endpoint { Url = "https://example.com/" };
+        db.Endpoints.Add(endpoint);
+        await db.SaveChangesAsync();
+        return endpoint;
+    }
+
+    private EndpointCheckWorker CreateWorker(HttpMessageHandler handler, CheckerOptions options) =>
+        new(
+            _services.GetRequiredService<IServiceScopeFactory>(),
+            new StubFactory(handler),
+            Options.Create(options),
+            NullLogger<EndpointCheckWorker>.Instance);
+
+    private async Task<CheckResult> GetSingleResultAsync()
+    {
+        using var scope = _services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AppDbContext>().CheckResults.SingleAsync();
+    }
+
+    [Fact]
+    public async Task CheckOneAsync_RetriesAfter500_AndSavesSuccessWhenNextAttemptReturns200()
+    {
+        var endpoint = await AddEndpointAsync();
+        var handler = new StubHandler(HttpStatusCode.InternalServerError, HttpStatusCode.OK);
+        var worker = CreateWorker(handler, new CheckerOptions { TimeoutSeconds = 5, MaxRetries = 2 });
+
+        // A 1s retry delay separates the two attempts.
+        await worker.CheckOneAsync(endpoint, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
+
+        var saved = await GetSingleResultAsync();
+        Assert.Equal(endpoint.Id, saved.EndpointId);
+        Assert.True(saved.Success);
+        Assert.Equal(200, saved.HttpStatusCode);
+        // Stops after the 200 even though a third attempt was allowed.
+        Assert.Equal(2, handler.CallTimes.Count);
+    }
+
+    [Fact]
+    public async Task CheckOneAsync_WhenResponseNeverArrives_TimesOutAndSavesFailureWithNullStatus()
+    {
+        var endpoint = await AddEndpointAsync();
+        var worker = CreateWorker(new HangingHandler(), new CheckerOptions { TimeoutSeconds = 1, MaxRetries = 0 });
+
+        // The bound turns a missing timeout into a test failure instead of a hung test run.
+        await worker.CheckOneAsync(endpoint, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
+
+        var saved = await GetSingleResultAsync();
+        Assert.Equal(endpoint.Id, saved.EndpointId);
+        Assert.False(saved.Success);
+        Assert.Null(saved.HttpStatusCode);
+        Assert.InRange(saved.LatencyMs, 900, 10_000);
     }
 
     [Fact]
