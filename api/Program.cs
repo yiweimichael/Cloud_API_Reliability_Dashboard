@@ -11,7 +11,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 }
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure()));
 builder.Services.Configure<CheckerOptions>(builder.Configuration.GetSection("Checker"));
 builder.Services.AddScoped<CheckResultService>();
 builder.Services.AddHttpClient("checker");
