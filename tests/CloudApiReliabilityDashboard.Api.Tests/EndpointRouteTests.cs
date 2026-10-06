@@ -1,7 +1,9 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CloudApiReliabilityDashboard.Api.Data;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -46,6 +48,15 @@ public sealed class EndpointRouteTests : IDisposable
                 }
 
                 services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
+
+                // Swap Entra ID JWT validation for the fake scheme so tests don't need real tokens.
+                services.AddAuthentication(options =>
+                    {
+                        options.DefaultScheme = TestAuthHandler.SchemeName;
+                        options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+                        options.DefaultChallengeScheme = TestAuthHandler.SchemeName;
+                    })
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, null);
             });
         });
 
@@ -55,6 +66,7 @@ public sealed class EndpointRouteTests : IDisposable
         }
 
         _client = _factory.CreateClient();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(TestAuthHandler.SchemeName);
     }
 
     public void Dispose()
@@ -160,5 +172,15 @@ public sealed class EndpointRouteTests : IDisposable
         var response = await _client.GetAsync("/endpoints/999/checks");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetEndpoints_WithoutToken_ReturnsUnauthorized()
+    {
+        using var anonymousClient = _factory.CreateClient();
+
+        var response = await anonymousClient.GetAsync("/endpoints");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

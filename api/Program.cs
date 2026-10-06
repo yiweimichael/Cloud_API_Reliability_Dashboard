@@ -1,6 +1,8 @@
 using CloudApiReliabilityDashboard.Api.Checks;
 using CloudApiReliabilityDashboard.Api.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Web;
 using Endpoint = CloudApiReliabilityDashboard.Api.Data.Endpoint;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +17,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure()));
 builder.Services.Configure<CheckerOptions>(builder.Configuration.GetSection("Checker"));
 builder.Services.AddScoped<CheckResultService>();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
+builder.Services.AddAuthorization();
 builder.Services.AddHttpClient("checker");
 if (builder.Configuration.GetValue<bool>("Checker:Enabled", true))
 {
@@ -22,6 +27,9 @@ if (builder.Configuration.GetValue<bool>("Checker:Enabled", true))
 }
 
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
@@ -38,14 +46,15 @@ app.MapPost("/endpoints", async (CreateEndpointRequest request, AppDbContext db)
     await db.SaveChangesAsync();
 
     return Results.Created($"/endpoints/{endpoint.Id}", new { id = endpoint.Id });
-});
+}).RequireAuthorization();
 
 app.MapGet("/endpoints", async (AppDbContext db) =>
     Results.Ok(await db.Endpoints
         .AsNoTracking()
         .OrderBy(e => e.Id)
         .Select(e => new { id = e.Id, url = e.Url })
-        .ToListAsync()));
+        .ToListAsync()))
+    .RequireAuthorization();
 
 app.MapGet("/endpoints/{id:int}/checks", async (int id, AppDbContext db) =>
 {
@@ -71,7 +80,7 @@ app.MapGet("/endpoints/{id:int}/checks", async (int id, AppDbContext db) =>
         .ToListAsync();
 
     return Results.Ok(checks);
-});
+}).RequireAuthorization();
 
 app.Run();
 
