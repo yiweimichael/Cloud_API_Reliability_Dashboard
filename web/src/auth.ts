@@ -14,6 +14,19 @@ export const msal = new PublicClientApplication({
 
 export const apiScopes = ['api://6829060d-15ff-4626-abd8-f4df997c3bb9/access_as_user']
 
+// Asking for the API scope at sign-in means the first silent token request succeeds.
+export function signIn() {
+  return msal.loginRedirect({ scopes: apiScopes })
+}
+
+// Ends the Entra session too, then comes back to the signed-out landing page.
+export function signOut() {
+  return msal.logoutRedirect({
+    account: msal.getActiveAccount() ?? undefined,
+    postLogoutRedirectUri: window.location.origin,
+  })
+}
+
 export async function getAccessToken() {
   const account = msal.getActiveAccount() ?? undefined
   try {

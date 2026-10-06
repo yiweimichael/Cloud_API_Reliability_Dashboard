@@ -121,7 +121,7 @@ button:disabled {
   color: inherit;
 }
 
-.add button {
+.primary {
   background: var(--series-1);
   border-color: var(--series-1);
   color: #fff;
@@ -149,4 +149,37 @@ button:disabled {
 .delete:hover {
   color: var(--critical);
   border-color: var(--critical);
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.top h1 {
+  margin: 0;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.account .muted {
+  overflow-wrap: anywhere;
+}
+
+.landing {
+  text-align: center;
+  padding-top: 15vh;
+}
+
+.landing p {
+  margin: 0 0 24px;
 }

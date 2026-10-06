@@ -2,7 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { apiScopes, msal } from './auth.ts'
+import SignedOut from './SignedOut.tsx'
+import { msal } from './auth.ts'
 
 async function start() {
   await msal.initialize()
@@ -10,17 +11,12 @@ async function start() {
   const result = await msal.handleRedirectPromise()
   const account = result?.account ?? msal.getAllAccounts()[0]
 
-  if (!account) {
-    // Asking for the API scope here means the first silent token request succeeds.
-    await msal.loginRedirect({ scopes: apiScopes })
-    return
+  if (account) {
+    msal.setActiveAccount(account)
   }
 
-  msal.setActiveAccount(account)
   createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
+    <StrictMode>{account ? <App account={account} /> : <SignedOut />}</StrictMode>,
   )
 }
 

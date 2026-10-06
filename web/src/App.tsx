@@ -1,6 +1,7 @@
+import type { AccountInfo } from '@azure/msal-browser'
 import { type FormEvent, useEffect, useState } from 'react'
 import './App.css'
-import { getAccessToken } from './auth.ts'
+import { getAccessToken, signOut } from './auth.ts'
 
 type Endpoint = { id: number; url: string }
 
@@ -61,7 +62,7 @@ function timeAgo(iso: string, now: number) {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
-function App() {
+function App({ account }: { account: AccountInfo }) {
   const [data, setData] = useState<EndpointWithChecks[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadedAt, setLoadedAt] = useState(0)
@@ -108,7 +109,15 @@ function App() {
 
   return (
     <main className="page">
-      <h1>API Reliability Dashboard</h1>
+      <header className="top">
+        <h1>API Reliability Dashboard</h1>
+        <div className="account">
+          <span className="muted">{account.username || account.name}</span>
+          <button type="button" onClick={() => signOut()}>
+            Sign out
+          </button>
+        </div>
+      </header>
       <AddEndpointForm onAdded={reload} />
       {error && <p className="error">{error}</p>}
       {!data && !error && <p className="muted">Loading…</p>}
@@ -164,7 +173,7 @@ function AddEndpointForm({ onAdded }: { onAdded: () => void }) {
         onChange={(e) => setUrl(e.target.value)}
         disabled={busy}
       />
-      <button type="submit" disabled={busy}>
+      <button type="submit" className="primary" disabled={busy}>
         {busy ? 'Adding…' : 'Add'}
       </button>
       {error && <p className="error">{error}</p>}
