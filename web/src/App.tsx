@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import './App.css'
 import { getAccessToken } from './auth.ts'
 
@@ -16,9 +16,27 @@ type EndpointWithChecks = Endpoint & { checks: Check[] }
 
 const REFRESH_MS = 30_000
 
-async function getJson<T>(url: string): Promise<T> {
+async function apiFetch(url: string, init?: { method: string; body?: unknown }) {
   const token = await getAccessToken()
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+  if (init?.body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
+  return fetch(url, {
+    method: init?.method,
+    headers,
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+  })
+}
+
+// The API answers 400/409 with { error: "..." }; fall back to the status code otherwise.
+async function errorMessage(response: Response) {
+  const body = await response.json().catch(() => null)
+  return body?.error ?? `Request failed (${response.status})`
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await apiFetch(url)
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}`)
   }
@@ -47,8 +65,12 @@ function App() {
   const [data, setData] = useState<EndpointWithChecks[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadedAt, setLoadedAt] = useState(0)
+  // Bumped after an add or delete to reload right away instead of waiting for the timer.
+  const [reloadKey, setReloadKey] = useState(0)
+  const reload = () => setReloadKey((k) => k + 1)
 
   useEffect(() => {
+    // Also drops a load still in flight when a newer one starts, so stale data can't win.
     let cancelled = false
     const refresh = () =>
       loadAll()
@@ -59,7 +81,7 @@ function App() {
           setLoadedAt(Date.now())
         })
         .catch((e: Error) => {
-          if (!cancelled) setError(e.message)
+          if (!cancelled) setError(`Failed to load: ${e.message}`)
         })
 
     refresh()
@@ -68,22 +90,85 @@ function App() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [])
+  }, [reloadKey])
+
+  async function remove(endpoint: Endpoint) {
+    if (!confirm(`Stop monitoring ${endpoint.url}? Its check history will be deleted too.`)) return
+    try {
+      const response = await apiFetch(`/endpoints/${endpoint.id}`, { method: 'DELETE' })
+      // 404 means it's already gone, which is what we wanted.
+      if (!response.ok && response.status !== 404) {
+        throw new Error(await errorMessage(response))
+      }
+      reload()
+    } catch (e) {
+      setError(`Failed to delete: ${(e as Error).message}`)
+    }
+  }
 
   return (
     <main className="page">
       <h1>API Reliability Dashboard</h1>
-      {error && <p className="error">Failed to load: {error}</p>}
+      <AddEndpointForm onAdded={reload} />
+      {error && <p className="error">{error}</p>}
       {!data && !error && <p className="muted">Loading…</p>}
-      {data?.length === 0 && <p className="muted">No endpoints yet.</p>}
+      {data?.length === 0 && <p className="muted">No endpoints yet. Add a URL above to start monitoring it.</p>}
       {data?.map((endpoint) => (
         <section key={endpoint.id} className="card">
-          <p className="url">{endpoint.url}</p>
+          <div className="card-head">
+            <p className="url">{endpoint.url}</p>
+            <button type="button" className="delete" onClick={() => remove(endpoint)}>
+              Delete
+            </button>
+          </div>
           <Status latest={endpoint.checks[0]} now={loadedAt} />
           <LatencyChart checks={endpoint.checks} />
         </section>
       ))}
     </main>
+  )
+}
+
+function AddEndpointForm({ onAdded }: { onAdded: () => void }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await apiFetch('/endpoints', { method: 'POST', body: { url: url.trim() } })
+      if (!response.ok) {
+        setError(await errorMessage(response))
+        return
+      }
+      setUrl('')
+      onAdded()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="add" onSubmit={submit}>
+      <input
+        type="url"
+        required
+        placeholder="https://example.com"
+        aria-label="Endpoint URL"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        disabled={busy}
+      />
+      <button type="submit" disabled={busy}>
+        {busy ? 'Adding…' : 'Add'}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </form>
   )
 }
 

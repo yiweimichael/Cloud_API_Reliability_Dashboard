@@ -87,3 +87,66 @@ h1 {
 .chart .hit {
   fill: transparent;
 }
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.add input {
+  flex: 1 1 240px;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+.add button {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
+.add .error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.delete {
+  flex-shrink: 0;
+  font-size: 14px;
+  padding: 2px 10px;
+  color: var(--text-muted);
+}
+
+.delete:hover {
+  color: var(--critical);
+  border-color: var(--critical);
+}

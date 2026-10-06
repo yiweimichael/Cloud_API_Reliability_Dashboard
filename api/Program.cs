@@ -45,6 +45,14 @@ app.MapPost("/endpoints", async (CreateEndpointRequest request, AppDbContext db)
         return Results.BadRequest(new { error = "url must be an absolute http or https URL." });
     }
 
+    // Compare normalized URLs so "https://example.com" and "https://example.com/" count as the same.
+    // Checked in code rather than with a unique index: Url is nvarchar(max), and production already
+    // holds duplicates that an index migration would trip over.
+    if (await db.Endpoints.AnyAsync(e => e.Url == uri.AbsoluteUri))
+    {
+        return Results.Conflict(new { error = "This URL is already being monitored." });
+    }
+
     var endpoint = new Endpoint { Url = uri.AbsoluteUri };
     db.Endpoints.Add(endpoint);
     await db.SaveChangesAsync();
@@ -58,6 +66,13 @@ app.MapGet("/endpoints", async (AppDbContext db) =>
         .OrderBy(e => e.Id)
         .Select(e => new { id = e.Id, url = e.Url })
         .ToListAsync()))
+    .RequireAuthorization();
+
+// Check history goes with it: the CheckResults foreign key cascades on delete.
+app.MapDelete("/endpoints/{id:int}", async (int id, AppDbContext db) =>
+    await db.Endpoints.Where(e => e.Id == id).ExecuteDeleteAsync() == 0
+        ? Results.NotFound()
+        : Results.NoContent())
     .RequireAuthorization();
 
 app.MapGet("/endpoints/{id:int}/checks", async (int id, AppDbContext db) =>

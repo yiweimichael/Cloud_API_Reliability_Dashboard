@@ -105,6 +105,50 @@ public sealed class EndpointRouteTests : IDisposable
     }
 
     [Fact]
+    public async Task PostEndpoints_WithExistingUrl_ReturnsConflict()
+    {
+        await CreateEndpointAsync("https://example.com/");
+
+        // No trailing slash: normalizes to the same URL as the existing endpoint.
+        var response = await _client.PostAsJsonAsync("/endpoints", new { url = "https://example.com" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var list = await _client.GetFromJsonAsync<JsonElement>("/endpoints");
+        Assert.Single(list.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task DeleteEndpoint_RemovesEndpointAndItsChecks()
+    {
+        var id = await CreateEndpointAsync();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await new CheckResultService(db).SaveCheckResultAsync(id, true, 123, 200);
+        }
+
+        var response = await _client.DeleteAsync($"/endpoints/{id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var list = await _client.GetFromJsonAsync<JsonElement>("/endpoints");
+        Assert.Empty(list.EnumerateArray());
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.False(await db.CheckResults.AnyAsync(c => c.EndpointId == id));
+        }
+    }
+
+    [Fact]
+    public async Task DeleteEndpoint_ForUnknownEndpoint_ReturnsNotFound()
+    {
+        var response = await _client.DeleteAsync("/endpoints/999");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetEndpoints_ListsCreatedEndpoint()
     {
         var id = await CreateEndpointAsync("https://example.com/health");
