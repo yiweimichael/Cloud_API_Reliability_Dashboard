@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { getAccessToken } from './auth.ts'
 
 type Endpoint = { id: number; url: string }
 
@@ -16,7 +17,8 @@ type EndpointWithChecks = Endpoint & { checks: Check[] }
 const REFRESH_MS = 30_000
 
 async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+  const token = await getAccessToken()
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}`)
   }
