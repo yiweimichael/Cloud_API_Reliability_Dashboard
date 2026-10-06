@@ -1,105 +1,169 @@
-# Cloud_API_Reliability_Dashboard
-Build a small app that checks a few configured API endpoints and shows whether they’re responding, how long they take, and how that changes over time.
+# Cloud API Reliability Dashboard
 
-## Planned MVP
-- An ASP.NET Core API manages monitored endpoints and check history.
-- A background service checks each endpoint on a schedule, with timeouts and basic retry handling.
-- Azure SQL stores endpoint details and check results.
-- A React page shows current status and a simple latency history.
-- Users sign in through Microsoft Entra External ID. The React app sends JWT access tokens with API requests.
-- A CI/CD pipeline deploys the application.
+A small cloud-native app that monitors HTTP endpoints. Add a URL and a background checker calls it every minute. The dashboard shows whether it's up, its HTTP status and latency, and a latency chart for the last 50 checks.
 
-## Basic architecture
+**Live demo:** https://apidash-yw-hdehg7bbfkhaf3f2.canadaeast-01.azurewebsites.net. Sign in or create an account with any email address.
 
-| Part | Responsibility |
-| --- | --- |
-| React UI | Lets users manage monitored endpoints and view current status and latency history. Users sign in through Microsoft Entra External ID and send JWT access tokens with API requests. |
-| ASP.NET Core API | Validates access tokens, manages endpoint configuration, and returns status and check history to the UI. |
-| Background checker | Runs on a schedule, calls each monitored endpoint with a timeout and basic retry handling, and saves each result. For the MVP, it can run as a hosted service in the API application. |
-| Azure SQL | Stores monitored endpoint details and check results. The API and checker share the application's data access code. |
+**Stack:** ASP.NET Core (.NET 10) minimal API, EF Core, Azure SQL Database, React 19 + TypeScript (Vite), Microsoft Entra External ID (MSAL.js), Azure App Service, GitHub Actions.
+
+## Features
+
+- Sign in and sign out through Microsoft Entra External ID. The API rejects requests without a valid access token.
+- Add and delete monitored endpoints from the dashboard. Invalid and duplicate URLs are rejected with a clear message.
+- A background checker calls each endpoint on a schedule, with a per-attempt timeout and retries for server errors and network failures.
+- For each endpoint the dashboard shows current status (up/down, HTTP status, latency, time of last check) and a latency chart with failed checks marked in red. It refreshes every 30 seconds.
+- Every push to `main` builds, tests and deploys the app to Azure App Service.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    User[User] --> UI[React UI]
-    UI -->|Sign in| Entra[Microsoft Entra External ID]
-    UI -->|JWT access token + requests| API[ASP.NET Core API]
-    API -->|Read and write configuration and history| DB[(Azure SQL)]
-    Checker[Background checker] -->|Read endpoint configuration and save results| DB
-    Checker -->|Scheduled HTTP checks| Targets[Monitored endpoints]
+    Browser[Browser] -->|Sign in| Entra[Microsoft Entra External ID]
+    subgraph AppService[Azure App Service]
+        UI["React SPA (static files)"]
+        API[ASP.NET Core API]
+        Checker[Background checker]
+    end
+    Browser -->|Load page| UI
+    Browser -->|Requests with JWT access token| API
+    API -->|Endpoints and check history| DB[(Azure SQL)]
+    Checker -->|Read endpoints, save results| DB
+    Checker -->|HTTP checks every 60 s| Targets[Monitored endpoints]
+    GitHub[GitHub Actions] -->|Build, test, deploy| AppService
 ```
 
-The API serves user requests; the background checker performs scheduled checks independently of the UI. After a check is saved, the UI gets the latest status and latency history through the API. A CI/CD pipeline will build and deploy the API and UI.
+| Part | Responsibility |
+| --- | --- |
+| React SPA (`web/`) | Signs users in with MSAL.js, calls the API with the access token, and shows status and latency history. Built by Vite and served by the API from `wwwroot`. |
+| ASP.NET Core API (`api/`) | Validates Entra access tokens (Microsoft.Identity.Web) and exposes the endpoint and check-history routes. Serves the SPA's static files ahead of the auth middleware so the page itself loads without a token. |
+| Background checker | `EndpointCheckWorker`, a hosted service in the same app. It checks all endpoints concurrently on each tick and saves one result per endpoint. |
+| Azure SQL | Serverless database holding endpoints and check results, accessed through EF Core with migrations. |
+| GitHub Actions | `.github/workflows/deploy.yml`: builds the SPA, runs the tests, publishes the API with the SPA in `wwwroot`, and deploys to App Service. |
 
-This describes the intended architecture. The ASP.NET Core API can already create and list endpoints and return their check history, backed by SQL Server through EF Core with a migration. The background checker runs as a hosted service in the API and saves results through `CheckResultService.SaveCheckResultAsync`. Authentication and the UI are still planned.
+## How checks work
 
-## Check behavior and data
+- **Schedule:** each endpoint is checked every 60 seconds (`Checker:IntervalSeconds`). The first check runs one interval after the app starts.
+- **Success:** a check succeeds when the final attempt gets an HTTP status from 200 to 399.
+- **Timeout:** each attempt stops after 5 seconds (`Checker:TimeoutSeconds`).
+- **Retries:** a 5xx response, network error or timeout is retried up to 2 times (`Checker:MaxRetries`), waiting 1 second and then 2 seconds. A 4xx response is not retried, because retrying won't change it.
+- **Stored result:** one row per check: endpoint ID, check time (UTC), success, HTTP status (null if no response arrived), and the final attempt's latency.
+- **Isolation:** if checking or saving one endpoint fails, the error is logged and the other endpoints are unaffected.
 
-- **Schedule:** Each endpoint is checked every 60 seconds (`Checker:IntervalSeconds`).
-- **Success:** A check succeeds when the final attempt gets an HTTP status from 200 to 399.
-- **Timeout:** Each attempt stops after 5 seconds (`Checker:TimeoutSeconds`).
-- **Retries:** A 5xx response, network error, or timeout is retried up to 2 times (`Checker:MaxRetries`), waiting 1 second before the first retry and 2 seconds before the second. A 4xx response is not retried.
-- **Stored result:** One row per check: endpoint ID, check time, success/failure, HTTP status
-  (null if no response arrived), and the response time of the final attempt. Error details are not stored yet.
-
-## Background checker
-
-`EndpointCheckWorker` is a hosted service that starts with the API. On each interval it loads all endpoints from the database and checks them concurrently with the named `checker` `HttpClient`, then saves one result per endpoint. The first check runs one interval after startup. If checking or saving fails for one endpoint, the error is logged and the other endpoints are unaffected.
-
-It reads the `Checker` section of `appsettings.json` (`IntervalSeconds`, `TimeoutSeconds`, `MaxRetries`, `Enabled`). Any value can be overridden with an environment variable such as `Checker__IntervalSeconds=30`. Set `Checker:Enabled` to `false` to run the API without the checker; the route tests do this so they make no outbound HTTP calls.
-
-## Configuration and secrets
-
-Monitored endpoint settings will be managed through the API and stored in Azure SQL. The API reads its SQL Server connection string from `ConnectionStrings:DefaultConnection`. For local development, store the local SQL Server connection string in .NET user secrets, which are loaded when the API runs in the `Development` environment. In deployment, supply a separate Azure SQL connection string as the `ConnectionStrings__DefaultConnection` environment variable. Keep connection strings and other secrets out of source control. The method for storing endpoint credentials is still TBD.
+All `Checker` settings live in `api/appsettings.json` and can be overridden with environment variables such as `Checker__IntervalSeconds=30`. Set `Checker__Enabled=false` to run the API without the checker.
 
 ## API routes
 
+Every `/endpoints` route requires an `Authorization: Bearer <access token>` header and returns `401` without one.
+
 | Method and path | Behavior |
 | --- | --- |
-| `GET /health` | Returns `{ "status": "ok" }`. Does not test the database connection. |
-| `POST /endpoints` | Body `{ "url": "https://example.com/" }`. Returns `201` with `{ "id": <id> }`, or `400` if the URL is not an absolute http or https URL. |
+| `GET /health` | Returns `{ "status": "ok" }`. Anonymous. Doesn't test the database. |
 | `GET /endpoints` | Lists monitored endpoints as `{ id, url }`, ordered by id. |
-| `GET /endpoints/{id}/checks` | Returns the latest 50 check results for the endpoint, newest first, each with `id`, `endpointId`, `checkTimeUtc`, `success`, `latencyMs`, and `httpStatusCode`. Returns `404` if the endpoint does not exist. |
+| `POST /endpoints` | Body `{ "url": "https://example.com/" }`. Returns `201` with `{ "id": <id> }`. Returns `400` if the URL isn't an absolute http or https URL, and `409` if it's already monitored. URLs are compared after normalization, so `https://example.com` and `https://example.com/` are the same. Errors come back as `{ "error": "<message>" }`. |
+| `DELETE /endpoints/{id}` | Deletes the endpoint and its check history. Returns `204`, or `404` if it doesn't exist. |
+| `GET /endpoints/{id}/checks` | Returns the latest 50 check results, newest first, each with `id`, `endpointId`, `checkTimeUtc`, `success`, `latencyMs` and `httpStatusCode`. Returns `404` if the endpoint doesn't exist. |
 
-Check results are saved through `CheckResultService.SaveCheckResultAsync`, which stamps the current UTC time. The background checker calls it after each check; no route calls it.
+## Deployment
+
+The app runs as a single Linux Azure App Service Web App (.NET 10). The API and the SPA ship together, so the browser talks to one origin and no CORS setup is needed.
+
+On every push to `main` (or a manual run), [the workflow](.github/workflows/deploy.yml):
+
+1. Sets up Node 22 and .NET 10.
+2. Runs `npm ci && npm run build` in `web/`. The TypeScript type check is part of the build.
+3. Runs the test project. A failing test stops the deploy.
+4. Runs `dotnet publish` on the API and copies `web/dist` into the output's `wwwroot`.
+5. Deploys the output with `azure/webapps-deploy` using a publish profile.
+
+To deploy your own copy, it needs:
+
+| Where | Setting |
+| --- | --- |
+| GitHub repository secret | `AZURE_WEBAPP_PUBLISH_PROFILE`: the Web App's publish profile XML. The Web App needs "SCM Basic Auth Publishing Credentials" turned on. |
+| GitHub repository variable | `AZURE_WEBAPP_NAME`: the Web App's name. |
+| Web App → Environment variables → Connection strings | `DefaultConnection` (type `SQLAzure`): the Azure SQL connection string. |
+| Azure SQL server → Networking | "Allow Azure services and resources to access this server" turned on. |
+| Entra app registration for the SPA | The Web App's URL added as a Single-page application redirect URI. |
+
+The Entra settings (`AzureAd` in `api/appsettings.json` and the MSAL config in `web/src/auth.ts`) contain only public identifiers and are committed. The connection string is the only secret, and it lives in App Service settings and local user secrets, never in the repo. Schema changes are applied with `dotnet ef database update`; the pipeline doesn't run migrations.
 
 ## Local development
 
-The API project targets .NET 10. The planned full application also requires Node.js and npm for the React UI and a Microsoft Entra External ID development tenant for sign-in. Docker is a convenient way to run a local SQL Server database.
+Prerequisites: .NET 10 SDK, Node.js 22.12 or later, the EF Core tool (`dotnet tool install --global dotnet-ef`), and a SQL Server database. A SQL Server Docker container works, as does an Azure SQL database.
 
-To run the API, install the .NET 10 SDK and store your local SQL Server connection string with .NET user secrets. For a SQL Server container listening on port 1433, run this from the repository root, replacing `<local-password>` with its password. Set the environment to `Development` so the API loads user secrets:
+1. **Store the connection string** in .NET user secrets. It never goes in `appsettings.json`.
 
-```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=CloudApiReliabilityDashboard;User Id=sa;Password=<local-password>;Encrypt=True;TrustServerCertificate=True" --project api
-$env:DOTNET_ENVIRONMENT = "Development"
-dotnet run --project api
-```
+   ```powershell
+   dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<connection string>" --project api
+   ```
 
-The API registers `AppDbContext` with EF Core's SQL Server provider. The connection string is required at startup. Set `ConnectionStrings__DefaultConnection` in the deployment environment to the Azure SQL connection string; do not reuse the local value.
+   For a local SQL Server container, the connection string looks like `Server=localhost,1433;Database=CloudApiReliabilityDashboard;User Id=sa;Password=<local-password>;Encrypt=True;TrustServerCertificate=True`.
 
-1. Start a SQL Server container, then create or update the database schema with the EF Core migrations. Install the EF Core tool once with `dotnet tool install --global dotnet-ef`, then run:
+2. **Create the schema:**
 
    ```powershell
    dotnet ef database update --project api
    ```
 
-   Azure SQL will be used in the deployed environment.
-2. Run the API (see above), then try the routes on the URL printed by the application. For example:
+3. **Run the API.** The launch profile serves it on http://localhost:5000 in the `Development` environment, which loads user secrets.
 
    ```powershell
-   Invoke-RestMethod -Method Post -Uri http://localhost:<port>/endpoints -ContentType "application/json" -Body '{"url":"https://example.com/"}'
-   Invoke-RestMethod http://localhost:<port>/endpoints
+   dotnet run --project api
    ```
 
-   The background checker starts with the API, so endpoints you add get their first check result within one interval. View the results with `Invoke-RestMethod http://localhost:<port>/endpoints/<id>/checks`.
-3. Configure Entra settings when authentication is added.
-4. Configure the UI's API URL and Entra settings, then start the React development server and sign in through the UI.
+   If your local API points at the same database as production, run it with `$env:Checker__Enabled = "false"`. Otherwise both checkers write results and every endpoint is checked twice.
 
-Commands and configuration names for authentication and the UI will be added when those parts are implemented.
+4. **Run the web app:**
+
+   ```powershell
+   cd web
+   npm ci
+   npm run dev
+   ```
+
+   Open http://localhost:5173. Vite proxies `/endpoints` requests to the API on port 5000. Keep port 5173, because it's the registered sign-in redirect URI.
+
+Sign-in uses this project's Entra External ID tenant. To use your own, register an API app (exposing an `access_as_user` scope) and a SPA app. Then update `AzureAd` in `api/appsettings.json`, and `clientId`, `authority` and `apiScopes` in `web/src/auth.ts`. External ID authorities use `https://<subdomain>.ciamlogin.com/<tenant-id>/`.
 
 ## Tests
-
-The tests live in `tests/CloudApiReliabilityDashboard.Api.Tests`. Service tests cover `CheckResultService`, and route tests run the API through `WebApplicationFactory` with `Checker:Enabled=false`. Worker tests run `EndpointCheckWorker` against a stub `HttpMessageHandler` to cover retries and timeouts without network access. All of them use an in-memory SQLite database, so they need no SQL Server and no user secrets. The worker tests wait on real retry delays and timeouts, so they take a few seconds.
 
 ```powershell
 dotnet test tests/CloudApiReliabilityDashboard.Api.Tests
 ```
+
+The 17 tests need no SQL Server, no secrets and no network. They take a few seconds, because the worker tests wait on real retry delays and timeouts.
+
+- **Route tests** run the whole API in memory with `WebApplicationFactory`. They swap SQL Server for in-memory SQLite and Entra token validation for a fake auth scheme. They cover creating, listing and deleting endpoints, duplicate and invalid URLs, check-history ordering, `404`s, and `401` without a token.
+- **Worker tests** run `EndpointCheckWorker` against stub HTTP handlers. They cover retry after a 500, giving up after repeated 500s, and timing out when no response arrives.
+- **Service tests** cover how `CheckResultService` saves check results.
+
+## Design decisions
+
+- **The SPA is served by the API.** One deployable, one origin, no CORS configuration. Static files are mapped before authentication, so the page loads anonymously and the data routes stay protected.
+- **The checker runs inside the API process.** This is simple for a single instance. The trade-off is that scaling out to more instances would check every endpoint once per instance (see next steps).
+- **Duplicate URLs are rejected in code, not by a unique index.** `Url` is `nvarchar(max)`, which SQL Server can't index, and existing data already had duplicates.
+- **SQL retries are on.** `EnableRetryOnFailure` covers the delay while a paused serverless database resumes.
+- **Deleting cascades in the database.** Check results are removed through the foreign key's `ON DELETE CASCADE`, with no extra query in the API.
+
+## Limitations and next steps
+
+- **Shared endpoint list:** all signed-in users see and manage the same endpoints. Next: store an owner from the token's `oid` claim and filter by it.
+- **Single-instance checker:** move it to an Azure Functions timer or WebJob, or add a lease so only one instance checks.
+- **Credentials:** replace the SQL login with a managed identity, and the publish profile with GitHub OIDC federated credentials.
+- **Data growth:** each endpoint adds about 1,440 rows a day. Add a retention job or roll old rows up into hourly summaries.
+- **Monitoring:** add alerts when an endpoint goes down, Application Insights, and stored error details for failed checks.
+- **Infrastructure:** the Azure resources were created in the portal. Describe them in Bicep and run migrations from the pipeline.
+- **Free-tier hosting:** on an App Service plan without Always On, the app sleeps when idle and the checker pauses until the next request.
+
+## Repository layout
+
+```
+api/                ASP.NET Core API, background checker, EF Core model and migrations
+web/                React + TypeScript SPA (Vite)
+tests/              xUnit tests for the API, worker and services
+.github/workflows/  Build, test and deploy pipeline
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
