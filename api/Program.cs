@@ -28,6 +28,10 @@ if (builder.Configuration.GetValue<bool>("Checker:Enabled", true))
 
 var app = builder.Build();
 
+// Serve the React build (copied into wwwroot at publish time) ahead of auth so the page loads anonymously.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 

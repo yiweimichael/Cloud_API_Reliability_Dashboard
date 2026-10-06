@@ -1,0 +1,46 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build web
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Test API
+        run: dotnet test tests/CloudApiReliabilityDashboard.Api.Tests --configuration Release
+
+      - name: Publish API
+        run: dotnet publish api --configuration Release --output ${{ runner.temp }}/publish
+
+      # The API serves the React build from wwwroot (UseDefaultFiles/UseStaticFiles in Program.cs).
+      - name: Copy web build into wwwroot
+        run: |
+          mkdir -p ${{ runner.temp }}/publish/wwwroot
+          cp -r web/dist/. ${{ runner.temp }}/publish/wwwroot/
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ${{ runner.temp }}/publish
