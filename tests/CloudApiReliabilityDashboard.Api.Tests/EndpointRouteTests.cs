@@ -129,6 +129,32 @@ public sealed class EndpointRouteTests : IDisposable
     }
 
     [Fact]
+    public async Task GetChecks_ReturnsNewestFirst()
+    {
+        var id = await CreateEndpointAsync();
+        var older = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var newer = older.AddMinutes(1);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            // Insert directly with fixed timestamps; the older row goes in first so insertion order
+            // alone would return it first.
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.CheckResults.Add(new CheckResult { EndpointId = id, CheckTimeUtc = older, Success = true, LatencyMs = 100, HttpStatusCode = 200 });
+            db.CheckResults.Add(new CheckResult { EndpointId = id, CheckTimeUtc = newer, Success = false, LatencyMs = 200, HttpStatusCode = 500 });
+            await db.SaveChangesAsync();
+        }
+
+        var response = await _client.GetAsync($"/endpoints/{id}/checks");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var list = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
+        Assert.Equal(2, list.Count);
+        Assert.Equal(200, list[0].GetProperty("latencyMs").GetInt32());
+        Assert.Equal(100, list[1].GetProperty("latencyMs").GetInt32());
+    }
+
+    [Fact]
     public async Task GetChecks_ForUnknownEndpoint_ReturnsNotFound()
     {
         var response = await _client.GetAsync("/endpoints/999/checks");
